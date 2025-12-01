@@ -93,3 +93,9 @@ The “type legit 😅” modal
 Everything the players see
 
 Every button, animation & visual element comes from this file.
+## 🔗 Live Demo (Play Online)
+You can play the live, fully hosted version of Alphabet Spin here:
+
+👉 https://multiplayer-game-2.onrender.com
+
+
