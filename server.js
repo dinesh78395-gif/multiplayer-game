@@ -23,38 +23,38 @@ app.get("/__version", (_, res) => res.send("v10-ai-india-nodict"));
  */
 function looksLegitWord(w) {
   if (!w) return false;
-
   const t = w.trim().toLowerCase();
 
-  // 1) letters only, single token (no spaces/dots/dashes)
+  // letters only, single token
   if (!/^[a-z]+$/.test(t)) return false;
 
-  // 2) length bounds
+  // length bounds
   if (t.length < 3 || t.length > 12) return false;
 
-  // 3) must contain a vowel
+  // must contain a vowel
   if (!/[aeiou]/.test(t)) return false;
 
-  // 4) no three identical characters in a row (e.g., cooool)
+  // no three identical letters in a row
   if (/(.)\1\1/.test(t)) return false;
 
-  // 5) no three consonants in a row (blocks "strk", "bdsm", "ndrh", etc.)
-  if (/[bcdfghjklmnpqrstvwxyz]{3,}/.test(t)) return false;
+  // ✅ allow common 3-consonant clusters like 'tch', 'str', etc.
+  // only block 4 or more in a row (very unlikely in real words)
+  if (/[bcdfghjklmnpqrstvwxyz]{4,}/.test(t)) return false;
 
-  // 6) block some unlikely/awkward n-grams that commonly appear in junk
+  // block some unlikely letter combos
   const rare = ["qj","xv","zx","jj","kk","fq","jh","kjh","xq","pz"];
   if (rare.some(x => t.includes(x))) return false;
 
-  // 7) limit very rare letters overall (prevents zxq spam)
+  // limit very rare letters overall
   const rareCount = (t.match(/[qxz]/g) || []).length;
   if (rareCount > 2) return false;
 
-  // 8) block simple repeating patterns like "ababab" or "xyzxyz"
-  // (any 2–3 letter unit repeated 3+ times)
+  // block simple repeating patterns like 'ababab' or 'xyzxyz'
   if (/(..)\1{2,}/.test(t) || /(...)\1{2,}/.test(t)) return false;
 
   return true;
 }
+
 
 /**
  * Validates a category entry (name/place/animal/thing/movie) based purely on
@@ -273,3 +273,4 @@ function nextTurn(code) {
 // =============================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log("Server live → " + PORT));
+
