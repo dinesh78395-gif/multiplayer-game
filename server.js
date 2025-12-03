@@ -1,7 +1,6 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,84 +10,66 @@ app.use(express.static("public"));
 
 // Health checks for Render
 app.get("/__health", (_, res) => res.send("ok"));
-app.get("/__version", (_, res) => res.send("v10-ai-india"));
+app.get("/__version", (_, res) => res.send("v10-ai-india-nodict"));
 
 // =============================
-//      LOAD DICTIONARIES
-// =============================
-function loadDict(name) {
-  try {
-    const data = fs.readFileSync(__dirname + `/public/dict/${name}.json`, "utf8");
-    return JSON.parse(data).map(w => w.toLowerCase());
-  } catch (err) {
-    console.error(`⚠️ Missing dictionary: ${name}`);
-    return [];
-  }
-}
-
-const WORD_LIST = loadDict("words");      // 30,000 english words
-const NAMES     = loadDict("names");      // Indian + global names
-const ANIMALS   = loadDict("animals");    // India animals
-const PLACES    = loadDict("places");     // India cities/states
-const MOVIES    = loadDict("movies");     // India movies
-const THINGS    = loadDict("things");     // common nouns
-
-console.log("Loaded Dictionaries:");
-console.log({
-  words: WORD_LIST.length,
-  names: NAMES.length,
-  animals: ANIMALS.length,
-  places: PLACES.length,
-  movies: MOVIES.length,
-  things: THINGS.length
-});
-
-// =============================
-//   AI STYLE VALIDATION
+//   HEURISTIC WORD VALIDATION
+//   (NO DICTIONARIES USED)
 // =============================
 
-function looksAIRealWord(w) {
-  const t = w.toLowerCase();
+/**
+ * Returns true if "w" looks like a legit single word in English/Indian usage
+ * without using dictionaries. Purely form-based to block random gibberish.
+ */
+function looksLegitWord(w) {
+  if (!w) return false;
 
-  // must have vowel unless Indian name
-  if (!/[aeiou]/.test(t) && !NAMES.includes(t)) return false;
+  const t = w.trim().toLowerCase();
 
-  // block crazy clusters like “bhjtr”
-  if (/[bcdfghjklmnpqrstvwxyz]{4,}/.test(t) && !NAMES.includes(t)) return false;
+  // 1) letters only, single token (no spaces/dots/dashes)
+  if (!/^[a-z]+$/.test(t)) return false;
 
-  // weird patterns
+  // 2) length bounds
+  if (t.length < 3 || t.length > 12) return false;
+
+  // 3) must contain a vowel
+  if (!/[aeiou]/.test(t)) return false;
+
+  // 4) no three identical characters in a row (e.g., cooool)
+  if (/(.)\1\1/.test(t)) return false;
+
+  // 5) no three consonants in a row (blocks "strk", "bdsm", "ndrh", etc.)
+  if (/[bcdfghjklmnpqrstvwxyz]{3,}/.test(t)) return false;
+
+  // 6) block some unlikely/awkward n-grams that commonly appear in junk
   const rare = ["qj","xv","zx","jj","kk","fq","jh","kjh","xq","pz"];
   if (rare.some(x => t.includes(x))) return false;
 
-  // reject > 3 repeats
-  if (/(.)\1\1/.test(t)) return false;
+  // 7) limit very rare letters overall (prevents zxq spam)
+  const rareCount = (t.match(/[qxz]/g) || []).length;
+  if (rareCount > 2) return false;
+
+  // 8) block simple repeating patterns like "ababab" or "xyzxyz"
+  // (any 2–3 letter unit repeated 3+ times)
+  if (/(..)\1{2,}/.test(t) || /(...)\1{2,}/.test(t)) return false;
 
   return true;
 }
 
-function validateCategory(word, letter, cat) {
+/**
+ * Validates a category entry (name/place/animal/thing/movie) based purely on
+ * the letter + heuristic word checks; no dictionary/category lookups.
+ */
+function validateCategory(word, letter /*, cat */) {
   if (!word) return false;
 
   const t = word.trim().toLowerCase();
-  if (!t || t.length < 2) return false;
 
-  // must start with the letter
+  // must start with the round's letter
   if (t[0] !== letter.toLowerCase()) return false;
 
-  // only letters/spaces
-  if (!/^[a-z ]+$/.test(t)) return false;
-
-  // CATEGORY DICTIONARIES
-  if (cat === "name")   return NAMES.includes(t);
-  if (cat === "animal") return ANIMALS.includes(t);
-  if (cat === "place")  return PLACES.includes(t);
-  if (cat === "movie")  return MOVIES.includes(t);
-
-  // THING = english dictionary + things.json
-  if (!WORD_LIST.includes(t) && !THINGS.includes(t)) return false;
-
-  // AI-style check
-  return looksAIRealWord(t);
+  // apply heuristic legit-word checks
+  return looksLegitWord(t);
 }
 
 // =============================
@@ -99,8 +80,9 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 function randomLetter(used) {
   const avail = LETTERS.filter(l => !used.includes(l));
-  return avail.length ? avail[Math.floor(Math.random() * avail.length)]
-                      : LETTERS[Math.floor(Math.random() * LETTERS.length)];
+  return avail.length
+    ? avail[Math.floor(Math.random() * avail.length)]
+    : LETTERS[Math.floor(Math.random() * LETTERS.length)];
 }
 
 function makeRoomCode() {
@@ -129,7 +111,6 @@ function currentPlayer(room) {
 //          SOCKET LOGIC
 // =============================
 io.on("connection", socket => {
-
   // CREATE ROOM
   socket.on("createRoom", ({ name }) => {
     const code = makeRoomCode();
@@ -192,15 +173,16 @@ io.on("connection", socket => {
 
     const L = room.currentLetter;
 
+    // Heuristic-only validation for each category.
     const ok =
-      validateCategory(answers.name,   L, "name")   &&
-      validateCategory(answers.place,  L, "place")  &&
-      validateCategory(answers.animal, L, "animal") &&
-      validateCategory(answers.thing,  L, "thing")  &&
-      validateCategory(answers.movie,  L, "movie");
+      validateCategory(answers.name,   L) &&
+      validateCategory(answers.place,  L) &&
+      validateCategory(answers.animal, L) &&
+      validateCategory(answers.thing,  L) &&
+      validateCategory(answers.movie,  L);
 
     if (!ok) {
-      socket.emit("errorMsg", "Invalid entries! Use real Indian/English words.");
+      socket.emit("errorMsg", "Invalid entries! Use real-looking words (letters only, vowels, no junk).");
       return;
     }
 
@@ -241,7 +223,6 @@ io.on("connection", socket => {
 // =============================
 //        TURN ENGINE
 // =============================
-
 function startTurn(code) {
   const room = ROOMS[code];
   if (!room) return;
@@ -257,17 +238,20 @@ function startTurn(code) {
   room.turnSerial++;
   const serial = room.turnSerial;
 
-  room.currentLetter = randomLetter(room.usedLetters);
-  room.usedLetters.push(room.currentLetter);
-  room.timerEndTs = Date.now() + 60000;
+ room.currentLetter = randomLetter(room.usedLetters);
+room.usedLetters.push(room.currentLetter);
 
-  if (room.timerHandle) clearTimeout(room.timerHandle);
-  room.timerHandle = setTimeout(() => {
-    const r = ROOMS[code];
-    if (!r || r.turnSerial !== serial) return;
-    io.to(code).emit("toast", "Time's up!");
-    nextTurn(code);
-  }, 60500);
+// ⏱️ 30 SECONDS
+room.timerEndTs = Date.now() + 30000;
+
+if (room.timerHandle) clearTimeout(room.timerHandle);
+room.timerHandle = setTimeout(() => {
+  const r = ROOMS[code];
+  if (!r || r.turnSerial !== serial) return;
+  io.to(code).emit("toast", "Time's up!");
+  nextTurn(code);
+}, 30500);
+
 
   io.to(code).emit("turnStarted", {
     snapshot: snapshot(room),
@@ -288,7 +272,4 @@ function nextTurn(code) {
 //          START SERVER
 // =============================
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () =>
-  console.log("Server live → " + PORT)
-);
-
+server.listen(PORT, () => console.log("Server live → " + PORT));
