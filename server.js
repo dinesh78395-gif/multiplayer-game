@@ -8,19 +8,14 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.static("public"));
 
-// Health checks for Render
+// Health checks
 app.get("/__health", (_, res) => res.send("ok"));
-app.get("/__version", (_, res) => res.send("v10-ai-india-nodict"));
+app.get("/__version", (_, res) => res.send("v10-ai-india-nodict-30s-skipfix"));
 
 // =============================
 //   HEURISTIC WORD VALIDATION
 //   (NO DICTIONARIES USED)
 // =============================
-
-/**
- * Returns true if "w" looks like a legit single word in English/Indian usage
- * without using dictionaries. Purely form-based to block random gibberish.
- */
 function looksLegitWord(w) {
   if (!w) return false;
   const t = w.trim().toLowerCase();
@@ -37,11 +32,10 @@ function looksLegitWord(w) {
   // no three identical letters in a row
   if (/(.)\1\1/.test(t)) return false;
 
-  // ✅ allow common 3-consonant clusters like 'tch', 'str', etc.
-  // only block 4 or more in a row (very unlikely in real words)
+  // allow common 3-consonant clusters; block 4+ only
   if (/[bcdfghjklmnpqrstvwxyz]{4,}/.test(t)) return false;
 
-  // block some unlikely letter combos
+  // unlikely n-grams that show up in junk
   const rare = ["qj","xv","zx","jj","kk","fq","jh","kjh","xq","pz"];
   if (rare.some(x => t.includes(x))) return false;
 
@@ -55,20 +49,10 @@ function looksLegitWord(w) {
   return true;
 }
 
-
-/**
- * Validates a category entry (name/place/animal/thing/movie) based purely on
- * the letter + heuristic word checks; no dictionary/category lookups.
- */
 function validateCategory(word, letter /*, cat */) {
   if (!word) return false;
-
   const t = word.trim().toLowerCase();
-
-  // must start with the round's letter
   if (t[0] !== letter.toLowerCase()) return false;
-
-  // apply heuristic legit-word checks
   return looksLegitWord(t);
 }
 
@@ -169,11 +153,12 @@ io.on("connection", socket => {
     if (!room || room.state !== "playing") return;
 
     const cp = currentPlayer(room);
-    if (cp.id !== socket.id) return; // only current player
+    if (!cp || cp.id !== socket.id) return; // only current player
 
     const L = room.currentLetter;
+    const now = Date.now();
+    const isTimeUp = room.timerEndTs && now >= room.timerEndTs;
 
-    // Heuristic-only validation for each category.
     const ok =
       validateCategory(answers.name,   L) &&
       validateCategory(answers.place,  L) &&
@@ -181,11 +166,21 @@ io.on("connection", socket => {
       validateCategory(answers.thing,  L) &&
       validateCategory(answers.movie,  L);
 
-    if (!ok) {
-      socket.emit("errorMsg", "Invalid entries! Use real-looking words (letters only, vowels, no junk).");
+    // If time is already up, skip turn regardless of validity
+    if (isTimeUp) {
+      io.to(roomCode).emit("toast", ok ? "Too late! Time's up — no point." : "Invalid & time's up — skipping turn.");
+      nextTurn(roomCode);
+      io.to(roomCode).emit("roomUpdate", snapshot(room));
       return;
     }
 
+    if (!ok) {
+      // Not time-up yet: just tell the player to fix it
+      socket.emit("errorMsg", "Invalid entries! Letters only, must start with the letter, length 3–12, no repeats/junk.");
+      return;
+    }
+
+    // Valid and in time → score
     cp.score++;
     io.to(roomCode).emit("toast", `${cp.name} scored +1`);
     nextTurn(roomCode);
@@ -238,20 +233,20 @@ function startTurn(code) {
   room.turnSerial++;
   const serial = room.turnSerial;
 
- room.currentLetter = randomLetter(room.usedLetters);
-room.usedLetters.push(room.currentLetter);
+  room.currentLetter = randomLetter(room.usedLetters);
+  room.usedLetters.push(room.currentLetter);
 
-// ⏱️ 30 SECONDS
-room.timerEndTs = Date.now() + 30000;
+  // ⏱️ 30 seconds per turn
+  room.timerEndTs = Date.now() + 30000;
 
-if (room.timerHandle) clearTimeout(room.timerHandle);
-room.timerHandle = setTimeout(() => {
-  const r = ROOMS[code];
-  if (!r || r.turnSerial !== serial) return;
-  io.to(code).emit("toast", "Time's up!");
-  nextTurn(code);
-}, 30500);
-
+  if (room.timerHandle) clearTimeout(room.timerHandle);
+  room.timerHandle = setTimeout(() => {
+    const r = ROOMS[code];
+    if (!r || r.turnSerial !== serial) return; // stale guard
+    io.to(code).emit("toast", "Time's up!");
+    nextTurn(code);
+    io.to(code).emit("roomUpdate", snapshot(r));
+  }, 30500); // small buffer
 
   io.to(code).emit("turnStarted", {
     snapshot: snapshot(room),
@@ -263,14 +258,35 @@ function nextTurn(code) {
   const room = ROOMS[code];
   if (!room) return;
 
-  if (room.timerHandle) clearTimeout(room.timerHandle);
+  if (room.timerHandle) {
+    clearTimeout(room.timerHandle);
+    room.timerHandle = null;
+  }
   room.turnIndex++;
   startTurn(code);
 }
+
+// =============================
+//        WATCHDOG (failsafe)
+// =============================
+// If for any reason a room sits past time-up (e.g., process hiccup),
+// nudge it forward automatically.
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of Object.entries(ROOMS)) {
+    if (room.state === "playing" && room.timerEndTs && now - room.timerEndTs > 1500) {
+      // If timer handle somehow gone or stale, push the turn.
+      if (!room.timerHandle) {
+        io.to(code).emit("toast", "Auto-skip (watchdog).");
+        nextTurn(code);
+        io.to(code).emit("roomUpdate", snapshot(room));
+      }
+    }
+  }
+}, 2000);
 
 // =============================
 //          START SERVER
 // =============================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log("Server live → " + PORT));
-
