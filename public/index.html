@@ -21,10 +21,13 @@
         radial-gradient(1200px 800px at 75% -10%, rgba(110,139,255,.20), transparent 60%),
         radial-gradient(900px 600px at -10% 110%, rgba(0,229,255,.12), transparent 60%),
         linear-gradient(180deg, var(--bg1), var(--bg2));
-      padding: 28px 20px 48px;
+      padding: 28px 20px 72px; /* extra bottom for footer */
     }
     .container{max-width:1100px; margin:0 auto}
-    h1{margin:0 0 18px; letter-spacing:.5px; font-weight:800; font-size:clamp(26px,4vw,40px); display:flex; align-items:center; gap:12px; text-shadow:0 0 12px rgba(110,139,255,.45)}
+    h1{
+      margin:0 0 18px; letter-spacing:.5px; font-weight:800; font-size:clamp(26px,4vw,40px);
+      display:flex; align-items:center; gap:12px; text-shadow:0 0 12px rgba(110,139,255,.45);
+    }
     .badge{font-size:12px; letter-spacing:.2px; color:#0d1222; font-weight:700; background:linear-gradient(135deg,var(--accent),var(--good)); padding:6px 10px; border-radius:999px}
     .card{
       border:1px solid var(--border);
@@ -69,19 +72,56 @@
     .invalid{ border-color:var(--danger)!important; background: rgba(255,77,109,.08)!important; }
     @keyframes shake {0%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}100%{transform:translateX(0)}}
     .shake{animation:shake .35s ease-in-out}
+
+    /* Toasts */
     #toasts{position:fixed; right:18px; bottom:18px; display:flex; flex-direction:column; gap:10px; z-index:9998}
     .toast{background:rgba(18,22,40,.92); border:1px solid var(--border); padding:12px 14px; border-radius:12px; box-shadow:var(--glow-soft)}
+
+    /* Modal (reused for About) */
     .modal-backdrop{position:fixed; inset:0; background:rgba(5,8,16,.6); display:none; align-items:center; justify-content:center; z-index:9999}
-    .modal{width:min(520px,92vw); background:linear-gradient(180deg,rgba(18,22,40,.95),rgba(10,13,22,.95)); border:1px solid var(--border); border-radius:18px; padding:20px 18px 14px; box-shadow:var(--glow)}
+    .modal{width:min(560px,92vw); background:linear-gradient(180deg,rgba(18,22,40,.95),rgba(10,13,22,.95)); border:1px solid var(--border); border-radius:18px; padding:20px 18px 14px; box-shadow:var(--glow)}
     .modal h3{margin:0 0 6px} .modal p{margin:0 0 16px; color:var(--muted)} .modal footer{display:flex; justify-content:flex-end; gap:10px}
+
+    /* Header & hamburger */
+    .app-header{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;
+    }
+    .hamburger{
+      flex:0 0 auto; width:44px; height:44px; display:inline-flex; align-items:center; justify-content:center;
+      border-radius:12px; border:1px solid var(--border); background:rgba(14,18,30,.6); cursor:pointer;
+      box-shadow:0 2px 12px rgba(0,0,0,.25);
+      transition:.2s transform,.2s box-shadow,.2s background;
+    }
+    .hamburger:hover{transform:translateY(-1px); box-shadow:var(--glow-soft)}
+    .hamburger span{
+      position:relative; width:18px; height:2px; background:var(--txt); display:block;
+    }
+    .hamburger span::before, .hamburger span::after{
+      content:""; position:absolute; left:0; width:18px; height:2px; background:var(--txt);
+    }
+    .hamburger span::before{ top:-6px } .hamburger span::after{ top:6px }
+
+    /* Footer */
+    .app-footer{
+      position:fixed; left:0; right:0; bottom:0; padding:10px 16px; text-align:center; color:var(--muted); font-size:12px;
+      background:linear-gradient(180deg, rgba(10,13,25,0), rgba(10,13,25,.75));
+      border-top:1px solid var(--border);
+      backdrop-filter: blur(6px);
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>
-      Alphabet Spin — Multiplayer
-      <span class="badge">NEON MODE</span>
-    </h1>
+    <div class="app-header">
+      <h1>
+        Alphabet Spin — Multiplayer
+        <span class="badge">NEON MODE</span>
+      </h1>
+      <!-- HAMBURGER (About panel trigger) -->
+      <button id="btnAbout" class="hamburger" aria-label="Open About">
+        <span></span>
+      </button>
+    </div>
 
     <!-- LOBBY -->
     <div class="card" id="lobbyCard">
@@ -161,7 +201,7 @@
   <!-- Toasts -->
   <div id="toasts"></div>
 
-  <!-- Modal -->
+  <!-- Modal (reused for validation) -->
   <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
     <div class="modal">
       <h3 id="modalTitle">Type legit 😅</h3>
@@ -170,6 +210,46 @@
         <button id="modalOk" class="btn">OK</button>
       </footer>
     </div>
+  </div>
+
+  <!-- ABOUT PANEL (uses same modal styles) -->
+  <div id="aboutBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal" role="document" aria-labelledby="aboutTitle">
+      <h3 id="aboutTitle">About</h3>
+      <p class="muted" style="margin-top:-6px">App designed and built with AI assistance.</p>
+
+      <div class="card" style="margin:12px 0; padding:14px">
+        <h4 style="margin:0 0 8px">How to Play</h4>
+        <ol style="margin:0; padding-left:18px; color:var(--muted)">
+          <li>Create a room (or join with a code). The host starts the match.</li>
+          <li>Each round, a random letter is announced.</li>
+          <li>If it’s your turn, you have <b>30 seconds</b> to enter five words:
+            <b>Name</b>, <b>Place</b>, <b>Animal</b>, <b>Thing</b>, <b>Movie</b>.
+          </li>
+          <li>Every word must start with the current letter, be letters-only, length ≥ 3, and not be obvious junk.</li>
+          <li>No duplicates across your five entries.</li>
+          <li>Submit before time’s up to score <b>+1</b>. Invalid or late submissions are skipped.</li>
+          <li>Turns rotate between players. After the set rounds, highest score wins.</li>
+        </ol>
+      </div>
+
+      <div class="card" style="margin:12px 0; padding:14px">
+        <h4 style="margin:0 0 8px">Credits</h4>
+        <p class="muted" style="margin:0">
+          App designed and built with AI assistance.<br>
+          © 2025 <b>Alphabet Spin</b> — All Rights Reserved.
+        </p>
+      </div>
+
+      <footer>
+        <button id="aboutClose" class="btn">Close</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="app-footer">
+    © 2025 Alphabet Spin • App designed and built with AI assistance.
   </div>
 
   <!-- Socket.IO + Confetti -->
@@ -185,7 +265,7 @@
     const el = id => document.getElementById(id);
     const show = (id, v=true) => el(id).classList.toggle('hidden', !v);
 
-    /* Modal helpers */
+    /* Modal helpers (validation) */
     function showModal(title, msg){
       el('modalTitle').textContent = title || 'Type legit';
       el('modalMsg').textContent = msg || 'Please enter valid words.';
@@ -195,6 +275,14 @@
     function hideModal(){ el('modalBackdrop').style.display = 'none'; }
     el('modalOk').onclick = hideModal;
     window.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal(); });
+
+    /* ABOUT panel helpers */
+    function openAbout(){ el('aboutBackdrop').style.display = 'flex'; el('aboutClose').focus(); }
+    function closeAbout(){ el('aboutBackdrop').style.display = 'none'; }
+    el('btnAbout').addEventListener('click', openAbout);
+    el('aboutClose').addEventListener('click', closeAbout);
+    window.addEventListener('keydown', e => { if (e.key === 'Escape') closeAbout(); });
+    el('aboutBackdrop').addEventListener('click', (e)=>{ if (e.target === el('aboutBackdrop')) closeAbout(); });
 
     /* Confetti */
     function fireConfetti() {
@@ -372,6 +460,12 @@
 
     socket.on('toast', msg => toast(msg));
     socket.on('errorMsg', msg => { showModal('Type legit 😅', msg); shakeInputs(); });
+
+    /* ================================
+       AI Attribution (as requested)
+       ================================ */
+    // This app is entirely made by AI (assistance).
+    console.log("Alphabet Spin: This app was entirely created with AI assistance.");
   </script>
 </body>
 </html>
